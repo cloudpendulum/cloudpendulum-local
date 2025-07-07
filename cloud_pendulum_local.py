@@ -30,7 +30,7 @@ class Client:
             motor_id = joint["id"]
             if not motor_id in self.all_motor_ids:
                 raise RuntimeError(f"Motor with id {motor_id} is not connected")
-        
+
         for id in self.all_motor_ids:
             self.candle.addMd80(id)
 
@@ -40,7 +40,11 @@ class Client:
             md.setImpedanceControllerParams(0.0, 0.0);
             self.candle.controlMd80Enable(md, True)
 
+    def start_experiment(self):
         self.candle.begin()
+
+    def stop_experiment(self):
+        self._reset_motors()
 
     def get_position(self) -> list[float]:
         res: list[float] = []
@@ -49,36 +53,33 @@ class Client:
             pos = self._get_motor(motor_id).getPosition()
             pos_limit = joint["pos_limit"]
             if not -pos_limit < pos < pos_limit:
-                self._reset_motor(motor_id)
-                raise ValueError("PositionLimitViolation;value=",pos)
+                self._raise_exception(f"PositionLimitViolation;value={pos}")
             res = res + [pos]
         return res
-
-    def get_velocity(self, session_token: str) -> list[float]:
+ 
+    def get_velocity(self) -> list[float]:
         res: list[float] = []
         for joint in self._robot_joints():
             motor_id = joint["id"]
             vel = self._get_motor(motor_id).getVelocity()
             vel_limit = joint["vel_limit"]
             if not -vel_limit < vel < vel_limit:
-                self._reset_motor(motor_id)
-                raise ValueError("VelocityLimitViolation;value=",vel)
+                self._raise_exception(f"VelocityLimitViolation;value={vel}")
             res = res + [vel]
         return res
 
-    def get_torque(self, session_token: str) -> list[float]:
+    def get_torque(self) -> list[float]:
         res: list[float] = []
         for joint in self._robot_joints():
             motor_id = joint["id"]
             torque = self._get_motor(motor_id).getTorque()
             torque_limit = joint["torque_limit"]
             if not -torque_limit < torque < torque_limit:
-                self._reset_motor(motor_id)
-                raise ValueError("TorqueLimitViolation;value=",torque)
+                self._raise_exception(f"TorqueLimitViolation;value={torque}")
             res = res + [torque]
         return res
 
-    def set_position(self, positions: list[float | None] | float, session_token: str):
+    def set_position(self, positions: list[float | None] | float):
         positions = self._prepare_actuator_data(positions)
         for position, joint in zip(positions, self._robot_joints()):
             if position is None:
@@ -87,9 +88,9 @@ class Client:
             clamped_position = min(pos_limit, max(-pos_limit, position))
             self._get_motor(joint["id"]).setTargetPosition(clamped_position)
             if pos_limit < abs(position):
-                raise ValueError(f"Position clamped from {position} to {clamped_position}")
+               print(f"Position clamped from {position} to {clamped_position}")
 
-    def set_velocity(self, velocities: list[float | None] | float, session_token: str):
+    def set_velocity(self, velocities: list[float | None] | float):
         velocities = self._prepare_actuator_data(velocities)
         for velocity, joint in zip(velocities, self._robot_joints()):
             if velocity is None:
@@ -98,9 +99,9 @@ class Client:
             clamped_velocity = min(vel_limit, max(-vel_limit, velocity))
             self._get_motor(joint["id"]).setTargetPosition(clamped_velocity)
             if vel_limit < abs(velocity):
-                raise ValueError(f"Velocity clamped from {velocity} to {clamped_velocity}")
+                print(f"Velocity clamped from {velocity} to {clamped_velocity}")
 
-    def set_torque(self, torques: list[float | None] | float, session_token: str):
+    def set_torque(self, torques: list[float | None] | float):
         torques = self._prepare_actuator_data(torques)
         for torque, joint in zip(torques, self._robot_joints()):
             if torque is None:
@@ -109,7 +110,7 @@ class Client:
             clamped_torque = min(torque_limit, max(-torque_limit, torque))
             self._get_motor(joint["id"]).setTargetPosition(clamped_torque)
             if torque_limit < abs(torque):
-                raise ValueError(f"Torque clamped from {torque} to {clamped_torque}")
+                print(f"Torque clamped from {torque} to {clamped_torque}")
 
     def set_impedance_controller_params(
         self,
@@ -131,17 +132,16 @@ class Client:
         for md in self.candle.md80s:
             if md.getId() == id:
                 return md
-        raise ValueError(f"No motor with id {id} connected")
+        self._raise_exception(f"No motor with id {id} connected")
 
-    def _reset_motor(self, id: int):
-        motor = self._get_motor(id)
-        pos = motor.getPosition()
-        offset = round(pos / (2.0 * math.pi)) * (2.0 * math.pi)
-
-        motor.setImpedanceControllerParams(0.05, 0.005)
-        motor.setTargetTorque(0.0)
-        motor.setTargetPosition(0.0)
-        motor.setTargetVelocity(0.0)
+    def _reset_motors(self):
+        for motor in self.candle.md80s:
+            pos = motor.getPosition()
+            offset = round(pos / (2.0 * math.pi)) * (2.0 * math.pi)
+            motor.setImpedanceControllerParams(0.05, 0.005)
+            motor.setTargetTorque(0.0)
+            motor.setTargetPosition(offset)
+            motor.setTargetVelocity(0.0)
         time.sleep(2.0)
         self.candle.end()
 
@@ -154,6 +154,10 @@ class Client:
         for d in data:
             if d is not None:
                 d = float(d)
-        if len(data) != len(self._robot_joints):
-            raise RuntimeError(f"Wrong number of arguments supplied; Expected {len(self._robot_joints())}, got {len(data)}")
+        if len(data) != len(self._robot_joints()):
+            self._raise_exception(f"Wrong number of arguments supplied; Expected {len(self._robot_joints())}, got {len(data)}")
         return data
+
+    def _raise_exception(self, message):
+        self._reset_motors()
+        raise RuntimeError(message)
