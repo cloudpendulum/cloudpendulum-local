@@ -2,6 +2,19 @@ import pyCandle
 import time
 import json
 import math
+from dataclasses import dataclass
+
+@dataclass
+class UserInfo:
+    user_name: str
+    max_experiment_length: int
+    number_of_attempts: int
+    max_bucket_size: int
+    bucket_size: int
+    refil_interval: int
+    valid_from: int
+    valid_until: int
+    experiment_types: [str]
 
 class Client:
 
@@ -40,13 +53,37 @@ class Client:
             md.setImpedanceControllerParams(0.0, 0.0);
             self.candle.controlMd80Enable(md, True)
 
-    def start_experiment(self):
+    def start_experiment(
+        self,
+        user_token: str = "",
+        experiment_type: str = "",
+        requested_time: float = 0.0,
+        record: bool = False
+    ) -> tuple[str, str]:
         self.candle.begin()
+        return "", ""
 
-    def stop_experiment(self):
+    def stop_experiment(self, user_token: str = "") -> str:
         self._reset_motors()
+        return ""
 
-    def get_position(self) -> list[float]:
+    def get_user_info(self, user_token: str = "") -> UserInfo:
+        return UserInfo(
+            user_name = "",
+            max_experiment_length= = 0.0,
+            number_of_attempts = 0,
+            max_bucket_size = 0,
+            bucket_size = 0,
+            refil_interval = 0,
+            valid_from = 0,
+            valid_until = 0,
+            experiment_types = []
+        )
+
+    def get_joint_names(self, session_token: str = "") -> list[str]:
+        return list(map(lambda j: j["name"], self._robot_joints()))
+
+    def get_position(self, session_token: str = "") -> list[float]:
         res: list[float] = []
         for joint in self._robot_joints():
             motor_id = joint["id"]
@@ -57,7 +94,7 @@ class Client:
             res = res + [pos]
         return res
  
-    def get_velocity(self) -> list[float]:
+    def get_velocity(self, session_token: str = "") -> list[float]:
         res: list[float] = []
         for joint in self._robot_joints():
             motor_id = joint["id"]
@@ -68,7 +105,7 @@ class Client:
             res = res + [vel]
         return res
 
-    def get_torque(self) -> list[float]:
+    def get_torque(self, session_token: str = "") -> list[float]:
         res: list[float] = []
         for joint in self._robot_joints():
             motor_id = joint["id"]
@@ -79,7 +116,7 @@ class Client:
             res = res + [torque]
         return res
 
-    def set_position(self, positions: list[float | None] | float):
+    def set_position(self, positions: list[float | None] | float, session_token: str = ""):
         positions = self._prepare_actuator_data(positions)
         for position, joint in zip(positions, self._robot_joints()):
             if position is None:
@@ -90,7 +127,7 @@ class Client:
             if pos_limit < abs(position):
                print(f"Position clamped from {position} to {clamped_position}")
 
-    def set_velocity(self, velocities: list[float | None] | float):
+    def set_velocity(self, velocities: list[float | None] | float, session_token: str = ""):
         velocities = self._prepare_actuator_data(velocities)
         for velocity, joint in zip(velocities, self._robot_joints()):
             if velocity is None:
@@ -101,7 +138,7 @@ class Client:
             if vel_limit < abs(velocity):
                 print(f"Velocity clamped from {velocity} to {clamped_velocity}")
 
-    def set_torque(self, torques: list[float | None] | float):
+    def set_torque(self, torques: list[float | None] | float, session_token: str = ""):
         torques = self._prepare_actuator_data(torques)
         for torque, joint in zip(torques, self._robot_joints()):
             if torque is None:
@@ -116,6 +153,7 @@ class Client:
         self,
         kp: float | list[float],
         kd: float | list[float],
+        session_token: str = ""
     ):
         kp = self._prepare_actuator_data(kp)
         kd = self._prepare_actuator_data(kd)
