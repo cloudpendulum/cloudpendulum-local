@@ -70,7 +70,7 @@ class Client:
     def get_user_info(self, user_token: str = "") -> UserInfo:
         return UserInfo(
             user_name = "",
-            max_experiment_length= = 0.0,
+            max_experiment_length = 0.0,
             number_of_attempts = 0,
             max_bucket_size = 0,
             bucket_size = 0,
@@ -92,8 +92,8 @@ class Client:
             if not -pos_limit < pos < pos_limit:
                 self._raise_exception(f"PositionLimitViolation;value={pos}")
             res = res + [pos]
-        return res
- 
+        return self._prepare_output_data(res)
+
     def get_velocity(self, session_token: str = "") -> list[float]:
         res: list[float] = []
         for joint in self._robot_joints():
@@ -103,7 +103,7 @@ class Client:
             if not -vel_limit < vel < vel_limit:
                 self._raise_exception(f"VelocityLimitViolation;value={vel}")
             res = res + [vel]
-        return res
+        return self._prepare_output_data(res)
 
     def get_torque(self, session_token: str = "") -> list[float]:
         res: list[float] = []
@@ -114,7 +114,7 @@ class Client:
             if not -torque_limit < torque < torque_limit:
                 self._raise_exception(f"TorqueLimitViolation;value={torque}")
             res = res + [torque]
-        return res
+        return self._prepare_output_data(res)
 
     def set_position(self, positions: list[float | None] | float, session_token: str = ""):
         positions = self._prepare_actuator_data(positions)
@@ -134,7 +134,7 @@ class Client:
                 continue
             vel_limit = joint["vel_limit"]
             clamped_velocity = min(vel_limit, max(-vel_limit, velocity))
-            self._get_motor(joint["id"]).setTargetPosition(clamped_velocity)
+            self._get_motor(joint["id"]).setTargetVelocity(clamped_velocity)
             if vel_limit < abs(velocity):
                 print(f"Velocity clamped from {velocity} to {clamped_velocity}")
 
@@ -145,7 +145,7 @@ class Client:
                 continue
             torque_limit = joint["torque_limit"]
             clamped_torque = min(torque_limit, max(-torque_limit, torque))
-            self._get_motor(joint["id"]).setTargetPosition(clamped_torque)
+            self._get_motor(joint["id"]).setTargetTorque(clamped_torque)
             if torque_limit < abs(torque):
                 print(f"Torque clamped from {torque} to {clamped_torque}")
 
@@ -194,6 +194,11 @@ class Client:
                 d = float(d)
         if len(data) != len(self._robot_joints()):
             self._raise_exception(f"Wrong number of arguments supplied; Expected {len(self._robot_joints())}, got {len(data)}")
+        return data
+
+    def _prepare_output_data(self, data: list[float]) -> list[float] | float:
+        if len(data) == 1:
+            return data[0]
         return data
 
     def _raise_exception(self, message):
