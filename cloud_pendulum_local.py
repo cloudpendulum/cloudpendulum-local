@@ -17,6 +17,32 @@ class UserInfo:
     experiment_types: [str]
 
 class Client:
+    """Client interface for running a cloud pendulum experiment on hardware
+    locally. The experiment is configured through a `robot.json` file which
+    should have the following format:
+
+    ```
+    {
+        "can-baud-rate": <1, 2, 5 or 8>,
+        "robot-joints": [
+            {
+                "id": <MOTOR_ID>,
+                "pos_limit": <POSITION LIMIT IN RADIANS>,
+                "vel_limit": <VELOCITY LIMIT IN RAD/s>,
+                "torque_limit": <TORQUE LIMIT IN Nm>,
+                "name": <SOME IDENTIFIER FOR DEBUGGING>
+            },
+            ...
+        ]
+    }
+    ```
+
+    The local client interface is made to be compatible with the client
+    interface for the server. Therfore, most methods take parameter
+    `session_token`, which is unused in this implementation. All method
+    parameters that have a default value (like the `session_token`) are unused
+    and can be ignored.
+    """
 
     def __init__(self) -> None:
         self.robot_config = {}
@@ -60,14 +86,29 @@ class Client:
         requested_time: float = 0.0,
         record: bool = False
     ) -> tuple[str, str]:
+        """Start the experiment by starting the candle loop
+
+        :return: Tuple of empty strings, for consistency with the remote
+            client.
+        """
         self.candle.begin()
         return "", ""
 
     def stop_experiment(self, user_token: str = "") -> str:
+        """Stop the experiment by restoring the motors to their resting
+        position and ending the candle loop
+
+        :return: Empty string, for consistency with the remote client.
+        """
         self._reset_motors()
         return ""
 
     def get_user_info(self, user_token: str = "") -> UserInfo:
+        """Unused method. Included for consistency with the remote client
+        interface.
+
+        :return: Default `UserInfo`, for consistency with the remote client.
+        """
         return UserInfo(
             user_name = "",
             max_experiment_length = 0.0,
@@ -81,9 +122,21 @@ class Client:
         )
 
     def get_joint_names(self, session_token: str = "") -> list[str]:
+        """Get the joint names listed in the `robot.json` file. Used for
+        debugging.
+
+        :return: List of joint names in the order they are defined in the
+            `robot.json` file.
+        """
         return list(map(lambda j: j["name"], self._robot_joints()))
 
-    def get_position(self, session_token: str = "") -> list[float]:
+    def get_position(self, session_token: str = "") -> list[float] | float:
+        """Get the positions of the actuators.
+
+        :return: The position of the actuators. The positions are returned as a
+            list if the experiment has more than one actuator. Otherwise, a
+            single number is returned.
+        """
         res: list[float] = []
         for joint in self._robot_joints():
             motor_id = joint["id"]
@@ -94,7 +147,13 @@ class Client:
             res = res + [pos]
         return self._prepare_output_data(res)
 
-    def get_velocity(self, session_token: str = "") -> list[float]:
+    def get_velocity(self, session_token: str = "") -> list[float] | float:
+        """Get the velocities of the actuators.
+
+        :return: The velocities of the actuators. The velocities are returned
+            as a list if the experiment has more than one actuator. Otherwise,
+            a single number is returned.
+        """
         res: list[float] = []
         for joint in self._robot_joints():
             motor_id = joint["id"]
@@ -105,7 +164,13 @@ class Client:
             res = res + [vel]
         return self._prepare_output_data(res)
 
-    def get_torque(self, session_token: str = "") -> list[float]:
+    def get_torque(self, session_token: str = "") -> list[float] | float:
+        """Get the torques of the actuators.
+
+        :return: The torques of the actuators. The torques are returned
+            as a list if the experiment has more than one actuator. Otherwise,
+            a single number is returned.
+        """
         res: list[float] = []
         for joint in self._robot_joints():
             motor_id = joint["id"]
@@ -117,6 +182,12 @@ class Client:
         return self._prepare_output_data(res)
 
     def set_position(self, positions: list[float | None] | float, session_token: str = ""):
+        """Set the target positions for the actuators.
+
+        :param positions: The target positions for the actuators. If None is
+            supplied for an actuator, it is ignored. A single number can be
+            supplied for experiments that only use a single motor.
+        """
         positions = self._prepare_actuator_data(positions)
         for position, joint in zip(positions, self._robot_joints()):
             if position is None:
@@ -128,6 +199,12 @@ class Client:
                print(f"Position clamped from {position} to {clamped_position}")
 
     def set_velocity(self, velocities: list[float | None] | float, session_token: str = ""):
+        """Set the target velocities for the actuators.
+
+        :param velocities: The target velocities for the actuators. If None is
+            supplied for an actuator, it is ignored. A single number can be
+            supplied for experiments that only use a single motor.
+        """
         velocities = self._prepare_actuator_data(velocities)
         for velocity, joint in zip(velocities, self._robot_joints()):
             if velocity is None:
@@ -139,6 +216,12 @@ class Client:
                 print(f"Velocity clamped from {velocity} to {clamped_velocity}")
 
     def set_torque(self, torques: list[float | None] | float, session_token: str = ""):
+        """Set the target torques for the actuators.
+
+        :param velocities: The target torques for the actuators. If None is
+            supplied for an actuator, it is ignored. A single number can be
+            supplied for experiments that only use a single motor.
+        """
         torques = self._prepare_actuator_data(torques)
         for torque, joint in zip(torques, self._robot_joints()):
             if torque is None:
@@ -151,12 +234,23 @@ class Client:
 
     def set_impedance_controller_params(
         self,
-        kp: float | list[float],
-        kd: float | list[float],
+        kp: float | list[float | None],
+        kd: float | list[float | None],
         session_token: str = ""
     ):
+        """Set the impedance controller parameters of the actuators.
+
+        :param kp: Displacement gain for each motor. Applies to all motors if
+            a single number is supplied.
+        :param kd: Damping coefficient for each motor. Applies to all motors if
+            a single number is supplied.
+        """
         kp = self._prepare_actuator_data(kp)
         kd = self._prepare_actuator_data(kd)
+        if len(kp) == 1:
+            kp = kp * len(self._robot_joints())
+        if len(kd) == 1:
+            kd = kd * len(self._robot_joints())
         for p, d, joint in zip(kp, kd, self._robot_joints()):
             if p is None or d is None:
                 continue
