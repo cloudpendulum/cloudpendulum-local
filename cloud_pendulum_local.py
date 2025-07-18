@@ -2,6 +2,7 @@ import pyCandle
 import time
 import json
 import math
+import numpy
 from dataclasses import dataclass
 
 @dataclass
@@ -298,6 +299,8 @@ class Client:
         self,
         data: float | list[float | None]
     ) -> list[float | None]:
+        if isinstance(data, numpy.ndarray):
+            data = data.tolist()
         if not isinstance(data, list):
             data = [data]
         for d in data:
