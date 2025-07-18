@@ -263,8 +263,8 @@ class Client:
         :param kd: Damping coefficient for each motor. Applies to all motors if
             a single number is supplied.
         """
-        kp = self._prepare_actuator_data(kp)
-        kd = self._prepare_actuator_data(kd)
+        kp = self._prepare_actuator_data_fill(kp)
+        kd = self._prepare_actuator_data_fill(kd)
         if len(kp) == 1:
             kp = kp * len(self._robot_joints())
         if len(kd) == 1:
@@ -308,6 +308,21 @@ class Client:
                 d = float(d)
         if len(data) != len(self._robot_joints()):
             self._raise_exception(f"Wrong number of arguments supplied; Expected {len(self._robot_joints())}, got {len(data)}")
+        return data
+
+    def _prepare_actuator_data_fill(
+                self,
+        data: float | list[float | None]
+    ) -> list[float | None]:
+        if isinstance(data, numpy.ndarray):
+            data = data.tolist()
+        if not isinstance(data, list):
+            data = [data]
+        for d in data:
+            if d is not None:
+                d = float(d)
+        if len(data) == 1:
+            data = data * len(self._robot_joints())
         return data
 
     def _prepare_output_data(self, data: list[float]) -> list[float] | float:
