@@ -16,6 +16,15 @@ class UserInfo:
     valid_until: int
     experiment_types: [str]
 
+@dataclass
+class Actuator:
+    """Information about an actuator, specific to a certain experiment type.
+    """
+    name: str
+    pos_limit: float
+    vel_limit: float
+    torque_limit: float
+
 class Client:
     """Client interface for running a cloud pendulum experiment on hardware
     locally. The experiment is configured through a `robot.json` file which
@@ -83,7 +92,8 @@ class Client:
         self,
         user_token: str = "",
         experiment_type: str = "",
-        requested_time: float = 0.0,
+        experiment_time: float = 0.0,
+        preparation_time: float = 0.0,
         record: bool = False
     ) -> tuple[str, str]:
         """Start the experiment by starting the candle loop
@@ -94,7 +104,7 @@ class Client:
         self.candle.begin()
         return "", ""
 
-    def stop_experiment(self, user_token: str = "") -> str:
+    def stop_experiment(self, session_token: str = "") -> str:
         """Stop the experiment by restoring the motors to their resting
         position and ending the candle loop
 
@@ -121,14 +131,21 @@ class Client:
             experiment_types = []
         )
 
-    def get_joint_names(self, session_token: str = "") -> list[str]:
-        """Get the joint names listed in the `robot.json` file. Used for
-        debugging.
+    def get_actuator_info(self, session_token: str = "") -> list[Actuator]:
+        """Get information about the actuator for the experiment specified in
+        robots.json
 
-        :return: List of joint names in the order they are defined in the
-            `robot.json` file.
+        :return: A list of `Actuator`s.
         """
-        return list(map(lambda j: j["name"], self._robot_joints()))
+        def create_actuator(joint: Any) -> Actuator:
+            return Actuator(
+                name = joint["name"],
+                pos_limit = joint["pos_limit"],
+                vel_limit = joint["vel_limit"],
+                torque_limit = joint["torque_limit"]
+            )
+
+        return list(map(lambda j: create_actuator, self._robot_joints()))
 
     def get_position(self, session_token: str = "") -> list[float] | float:
         """Get the positions of the actuators.
