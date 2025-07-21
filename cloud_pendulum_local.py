@@ -26,6 +26,9 @@ class Actuator:
     vel_limit: float
     torque_limit: float
 
+candle_instance = None
+motor_ids_instance = None
+
 class Client:
     """Client interface for running a cloud pendulum experiment on hardware
     locally. The experiment is configured through a `robot.json` file which
@@ -55,39 +58,41 @@ class Client:
     """
 
     def __init__(self) -> None:
+        global candle_instance
+        global motor_ids_instance
+        
         self.robot_config = {}
         with open(f"robot.json", "r") as f:
             self.robot_config = json.load(f)
 
         can_baud_rate_config = self.robot_config["can-baud-rate"]
-        can_baud_rate = None
-        if can_baud_rate_config == 1:
-            can_baud_rate = pyCandle.CAN_BAUD_1M
-        elif can_baud_rate_config == 2:
-            can_baud_rate = pyCandle.CAN_BAUD_2M
-        elif can_baud_rate_config == 5:
-            can_baud_rate = pyCandle.CAN_BAUD_5M
-        elif can_baud_rate_config == 8:
-            can_baud_rate = pyCandle.CAN_BAUD_8M
-        else:
-            raise RuntimeError(f"Invalid baudrate: {can_baud_rate_config}, should be 1, 2, 5 or 8")
-        self.candle: pyCandle.Candle = \
-            pyCandle.Candle(can_baud_rate, True, pyCandle.USB)
-        self.all_motor_ids: list[int] = self.candle.ping(can_baud_rate)
+        if candle_instance is None:
+            can_baud_rate = None
+            if can_baud_rate_config == 1:
+                can_baud_rate = pyCandle.CAN_BAUD_1M
+            elif can_baud_rate_config == 2:
+                can_baud_rate = pyCandle.CAN_BAUD_2M
+            elif can_baud_rate_config == 5:
+                can_baud_rate = pyCandle.CAN_BAUD_5M
+            elif can_baud_rate_config == 8:
+                can_baud_rate = pyCandle.CAN_BAUD_8M
+            else:
+                raise RuntimeError(f"Invalid baudrate: {can_baud_rate_config}, should be 1, 2, 5 or 8")
+            candle_instance = \
+                pyCandle.Candle(can_baud_rate, True, pyCandle.USB)
+            motor_ids_instance = candle_instance.ping(can_baud_rate)
+    
+            for id in motor_ids_instance:
+                candle_instance.addMd80(id)
+        
+        self.candle = candle_instance
+        self.all_motor_ids = motor_ids_instance
 
         for joint in self._robot_joints():
             motor_id = joint["id"]
             if not motor_id in self.all_motor_ids:
                 raise RuntimeError(f"Motor with id {motor_id} is not connected")
 
-        for id in self.all_motor_ids:
-            self.candle.addMd80(id)
-
-        for md in self.candle.md80s:
-            self.candle.controlMd80SetEncoderZero(md)
-            self.candle.controlMd80Mode(md, pyCandle.IMPEDANCE)
-            md.setImpedanceControllerParams(0.0, 0.0);
-            self.candle.controlMd80Enable(md, True)
 
     def start_experiment(
         self,
@@ -102,7 +107,14 @@ class Client:
         :return: Tuple of empty strings, for consistency with the remote
             client.
         """
+                
+        for md in self.candle.md80s:
+            self.candle.controlMd80SetEncoderZero(md)
+            self.candle.controlMd80Mode(md, pyCandle.IMPEDANCE)
+            md.setImpedanceControllerParams(0.0, 0.0);
+            self.candle.controlMd80Enable(md, True)
         self.candle.begin()
+        time.sleep(1.0)
         return "", ""
 
     def stop_experiment(self, session_token: str = "") -> str:
@@ -112,6 +124,7 @@ class Client:
         :return: Empty string, for consistency with the remote client.
         """
         self._reset_motors()
+        self.candle = None
         return ""
 
     def get_user_info(self, user_token: str = "") -> UserInfo:
@@ -265,10 +278,6 @@ class Client:
         """
         kp = self._prepare_actuator_data_fill(kp)
         kd = self._prepare_actuator_data_fill(kd)
-        if len(kp) == 1:
-            kp = kp * len(self._robot_joints())
-        if len(kd) == 1:
-            kd = kd * len(self._robot_joints())
         for p, d, joint in zip(kp, kd, self._robot_joints()):
             if p is None or d is None:
                 continue
