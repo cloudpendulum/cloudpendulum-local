@@ -130,12 +130,24 @@ class Client:
                 can_baud_rate = pyCandle.CAN_BAUD_8M
             else:
                 raise RuntimeError(f"Invalid baudrate: {can_baud_rate_config}, should be 1, 2, 5 or 8")
-            candle_instance = \
-                pyCandle.Candle(can_baud_rate, True, pyCandle.USB)
-            motor_ids_instance = candle_instance.ping(can_baud_rate)
-    
-            for id in motor_ids_instance:
-                candle_instance.addMd80(id)
+
+            while True:
+                try:
+                    candle_instance = \
+                        pyCandle.Candle(can_baud_rate, True, pyCandle.USB)
+                    motor_ids_instance = candle_instance.ping(can_baud_rate)
+                    valid = True
+
+                    for joint in self._robot_joints():
+                        if joint["id"] not in motor_ids_instance:
+                            valid = False
+                            break
+                    if valid:
+                        for id in motor_ids_instance:
+                            candle_instance.addMd80(id)
+                        break
+                except:
+                    raise RuntimeError("No valid candle")
         
         self.candle = candle_instance
         self.all_motor_ids = motor_ids_instance
