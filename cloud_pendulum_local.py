@@ -29,6 +29,58 @@ class Actuator:
 candle_instance = None
 motor_ids_instance = None
 
+def CubicTimeScaling(Tf, t):
+    """Computes s(t) for a cubic time scaling
+    Source: Modern Robotics Toolbox (https://github.com/NxRLab/ModernRobotics/blob/master/packages/Python/modern_robotics/core.py#L1455C1-L1469C61)
+    :param Tf: Total time of the motion in seconds from rest to rest
+    :param t: The current time t satisfying 0 < t < Tf
+    :return: The path parameter s(t) corresponding to a third-order
+             polynomial motion that begins and ends at zero velocity
+
+    Example Input:
+        Tf = 2
+        t = 0.6
+    Output:
+        0.216
+    """
+    return 3 * (1.0 * t / Tf) ** 2 - 2 * (1.0 * t / Tf) ** 3
+
+def JointTrajectory(thetastart, thetaend, Tf, N):
+    """Computes a straight-line trajectory in joint space
+    Source: Modern Robotics Toolbox (modified) 
+    :param thetastart: The initial joint variables
+    :param thetaend: The final joint variables
+    :param Tf: Total time of the motion in seconds from rest to rest
+    :param N: The number of points N > 1 (Start and stop) in the discrete
+              representation of the trajectory
+    :return: A trajectory as an N x n matrix, where each row is an n-vector
+             of joint variables at an instant in time. The first row is
+             thetastart and the Nth row is thetaend . The elapsed time
+             between each row is Tf / (N - 1)
+
+    Example Input:
+        thetastart = numpy.array([1, 0, 0, 1, 1, 0.2, 0,1])
+        thetaend = numpy.array([1.2, 0.5, 0.6, 1.1, 2, 2, 0.9, 1])
+        Tf = 4
+        N = 6
+        method = 3
+    Output:
+        numpy.array([[     1,     0,      0,      1,     1,    0.2,      0, 1]
+                  [1.0208, 0.052, 0.0624, 1.0104, 1.104, 0.3872, 0.0936, 1]
+                  [1.0704, 0.176, 0.2112, 1.0352, 1.352, 0.8336, 0.3168, 1]
+                  [1.1296, 0.324, 0.3888, 1.0648, 1.648, 1.3664, 0.5832, 1]
+                  [1.1792, 0.448, 0.5376, 1.0896, 1.896, 1.8128, 0.8064, 1]
+                  [   1.2,   0.5,    0.6,    1.1,     2,      2,    0.9, 1]])
+    """
+    N = int(N)
+    timegap = Tf / (N - 1.0)
+    traj = numpy.zeros((len(thetastart), N))
+    for i in range(N):
+        s = CubicTimeScaling(Tf, timegap * i)
+        traj[:, i] = s * numpy.array(thetaend) + (1 - s) * numpy.array(thetastart)
+    traj = numpy.array(traj).T
+    return traj
+
 class Client:
     """Client interface for running a cloud pendulum experiment on hardware
     locally. The experiment is configured through a `robot.json` file which
@@ -93,6 +145,33 @@ class Client:
             if not motor_id in self.all_motor_ids:
                 raise RuntimeError(f"Motor with id {motor_id} is not connected")
 
+    def go_to_state(self, x0: list[float]):
+        actuator_ids = []
+        for joint in self._robot_joints():
+            actuator_ids.append(joint["id"])
+        thetastart = []
+        for actuator_id in actuator_ids:
+            thetastart.append(self._get_motor(actuator_id).getPosition())
+        thetaend = x0
+        dt0 = 0.01
+        tf0 = 2.0
+        N0 = int(tf0 / dt0)
+        traj = JointTrajectory(thetastart, thetaend, tf0, N0)
+        for actuator_id in actuator_ids:
+            # self.motor_driver.set_impedance_controller_params_unchecked(actuator_id, 0.25, 0.0015)
+            motor = self._get_motor(actuator_id)
+            motor.setImpedanceControllerParams(0.25, 0.0015)
+        i = 0
+        current_time = time.time()
+        target_time = current_time
+        while i < N0:
+            for j, actuator_id in enumerate(actuator_ids):
+                # self.motor_driver.set_target_position_unchecked(actuator_id, traj[i][j])
+                self._get_motor(actuator_id).setTargetPosition(traj[i][j])
+            i += 1
+            target_time += dt0
+            current_time = time.time()
+            time.sleep(target_time - current_time)
 
     def start_experiment(
         self,
@@ -100,7 +179,8 @@ class Client:
         experiment_type: str = "",
         experiment_time: float = 0.0,
         preparation_time: float = 0.0,
-        record: bool = False
+        record: bool = False,
+        initial_state: list[float] | None = None,
     ) -> tuple[str, str]:
         """Start the experiment by starting the candle loop
 
@@ -115,6 +195,8 @@ class Client:
             self.candle.controlMd80Enable(md, True)
         self.candle.begin()
         time.sleep(1.0)
+        if initial_state is not None:
+            self.go_to_state(initial_state)
         return "", ""
 
     def stop_experiment(self, session_token: str = "") -> str:
