@@ -91,7 +91,7 @@ class Client:
         "can-baud-rate": <1, 2, 5 or 8>,
         "robot-joints": [
             {
-                "id": <MOTOR_ID>,
+                "id": <MOTOR_ID, or omit/null to auto-detect>,
                 "pos_limit": <POSITION LIMIT IN RADIANS>,
                 "vel_limit": <VELOCITY LIMIT IN RAD/s>,
                 "torque_limit": <TORQUE LIMIT IN Nm>,
@@ -101,6 +101,18 @@ class Client:
         ]
     }
     ```
+
+    `id` is optional. If a joint omits it (or sets it to `null`), that joint
+    is auto-assigned to a motor found on the CAN bus, the same way
+    `pendulum_plant.py`'s `activate_hardware()` does it -- ping the bus and
+    take whatever's connected. Joints that do specify an `id` are matched
+    against that exact motor as before (this is the original, backwards
+    compatible behavior); auto-assigned joints then claim whichever
+    remaining discovered motors aren't already spoken for by an explicit
+    `id`, in the order `robot-joints` lists them. For multi-joint setups
+    this order isn't guaranteed to match physical wiring -- prefer explicit
+    `id`s if joint identity matters, and check the "Auto-assigned motor ..."
+    printout at startup either way.
 
     The local client interface is made to be compatible with the client
     interface for the server. Therfore, most methods take parameter
@@ -112,7 +124,7 @@ class Client:
     def __init__(self) -> None:
         global candle_instance
         global motor_ids_instance
-        
+
         self.robot_config = {}
         with open(f"robot.json", "r") as f:
             self.robot_config = json.load(f)
@@ -131,31 +143,63 @@ class Client:
             else:
                 raise RuntimeError(f"Invalid baudrate: {can_baud_rate_config}, should be 1, 2, 5 or 8")
 
+            manual_ids = {
+                joint["id"] for joint in self._robot_joints()
+                if joint.get("id") is not None
+            }
+            auto_joint_count = sum(
+                1 for joint in self._robot_joints() if joint.get("id") is None
+            )
+
             while True:
                 try:
                     candle_instance = \
                         pyCandle.Candle(can_baud_rate, True, pyCandle.USB)
                     motor_ids_instance = candle_instance.ping(can_baud_rate)
-                    valid = True
 
-                    for joint in self._robot_joints():
-                        if joint["id"] not in motor_ids_instance:
-                            valid = False
-                            break
+                    # manually-pinned joints must all be present, and there
+                    # must be enough leftover motors to cover the
+                    # auto-detected joints
+                    available_for_auto = [
+                        id for id in motor_ids_instance if id not in manual_ids
+                    ]
+                    valid = manual_ids.issubset(set(motor_ids_instance)) \
+                        and len(available_for_auto) >= auto_joint_count
+
                     if valid:
                         for id in motor_ids_instance:
                             candle_instance.addMd80(id)
                         break
                 except:
                     raise RuntimeError("No valid candle")
-        
+
         self.candle = candle_instance
         self.all_motor_ids = motor_ids_instance
 
+        claimed_ids = {
+            joint["id"] for joint in self._robot_joints()
+            if joint.get("id") is not None
+        }
+        available_for_auto = [
+            id for id in self.all_motor_ids if id not in claimed_ids
+        ]
+        next_auto = 0
         for joint in self._robot_joints():
-            motor_id = joint["id"]
-            if not motor_id in self.all_motor_ids:
-                raise RuntimeError(f"Motor with id {motor_id} is not connected")
+            if joint.get("id") is not None:
+                if joint["id"] not in self.all_motor_ids:
+                    raise RuntimeError(f"Motor with id {joint['id']} is not connected")
+                continue
+
+            if next_auto >= len(available_for_auto):
+                raise RuntimeError(
+                    f"Could not auto-assign a motor to joint "
+                    f"'{joint.get('name', '?')}': not enough connected motors "
+                    f"({len(self.all_motor_ids)} found, {len(claimed_ids)} "
+                    f"explicitly assigned in robot.json)"
+                )
+            joint["id"] = available_for_auto[next_auto]
+            next_auto += 1
+            print(f"Auto-assigned motor {joint['id']} to joint '{joint.get('name', '?')}'")
 
     def go_to_state(self, x0: list[float]):
         actuator_ids = []
