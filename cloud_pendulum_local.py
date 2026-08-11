@@ -191,6 +191,7 @@ class Client:
 
         self.candle = candle_instance
         self.all_motor_ids = motor_ids_instance
+        self.experiment_type = ""
 
         claimed_ids = {
             joint["id"] for joint in self._robot_joints()
@@ -262,6 +263,7 @@ class Client:
         :return: Tuple of empty strings, for consistency with the remote
             client.
         """
+        self.experiment_type = experiment_type
 
         for md in self.candle.md80s:
             self.candle.controlMd80SetEncoderZero(md)
@@ -528,6 +530,21 @@ class Client:
     def _robot_joints(self):
         return self.robot_config["robot-joints"]
 
+    def _active_joint_indices(self) -> list[int]:
+        """Indices into `_robot_joints()` of the actuators that accept
+        control input for the current `experiment_type`. Pendubot/Acrobot
+        run on double-pendulum hardware (two physical joints) but only
+        drive one of them -- the other is left uncommanded, i.e. at
+        whatever impedance it was last set to (zero by default, see
+        `start_experiment`).
+        """
+        joints = self._robot_joints()
+        if self.experiment_type == "Pendubot":
+            return [0]
+        if self.experiment_type == "Acrobot":
+            return [len(joints) - 1]
+        return list(range(len(joints)))
+
     def _get_motor(self, id: int) -> pyCandle.Md80:
         for md in self.candle.md80s:
             if md.getId() == id:
@@ -556,9 +573,13 @@ class Client:
         for d in data:
             if d is not None:
                 d = float(d)
-        if len(data) != len(self._robot_joints()):
-            self._raise_exception(f"Wrong number of arguments supplied; Expected {len(self._robot_joints())}, got {len(data)}")
-        return data
+        active_indices = self._active_joint_indices()
+        if len(data) != len(active_indices):
+            self._raise_exception(f"Wrong number of arguments supplied; Expected {len(active_indices)}, got {len(data)}")
+        full_data: list[float | None] = [None] * len(self._robot_joints())
+        for value, index in zip(data, active_indices):
+            full_data[index] = value
+        return full_data
 
     def _prepare_actuator_data_fill(
                 self,
@@ -571,9 +592,15 @@ class Client:
         for d in data:
             if d is not None:
                 d = float(d)
+        active_indices = self._active_joint_indices()
         if len(data) == 1:
-            data = data * len(self._robot_joints())
-        return data
+            data = data * len(active_indices)
+        if len(data) != len(active_indices):
+            self._raise_exception(f"Wrong number of arguments supplied; Expected {len(active_indices)}, got {len(data)}")
+        full_data: list[float | None] = [None] * len(self._robot_joints())
+        for value, index in zip(data, active_indices):
+            full_data[index] = value
+        return full_data
 
     def _prepare_output_data(self, data: list[float]) -> list[float] | float:
         if len(data) == 1:
