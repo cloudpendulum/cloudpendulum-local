@@ -155,7 +155,7 @@ class Client:
                 if joint.get("id") is not None
             }
             auto_joint_count = sum(
-                1 for joint in self._robot_joints() if joint.get("id") is None
+                [1 for joint in self._robot_joints() if joint.get("id") is None] + [0]
             )
 
             while True:
@@ -177,8 +177,8 @@ class Client:
                         for id in motor_ids_instance:
                             candle_instance.addMd80(id)
                         break
-                except:
-                    raise RuntimeError("No valid candle")
+                except Exception as e:
+                    raise RuntimeError(f"No valid candle: {e!r}") from e
 
         self.candle = candle_instance
         self.all_motor_ids = motor_ids_instance

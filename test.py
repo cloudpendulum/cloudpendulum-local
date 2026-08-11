@@ -24,6 +24,9 @@ args = parser.parse_args()
 experiment_type = args.experiment_type
 is_double_pendulum = experiment_type == "DoublePendulum"
 
+if not is_double_pendulum:
+    print("Defaulting to SinglePendulum. If you have DoublePendulum hardware instead, this can lead to confusing error messages.")
+
 # Read robot.json ourselves (before Client() mutates its own copy) so we can
 # tell which joints had no "id" pinned, i.e. were auto-detected on the bus.
 with open("robot.json", "r") as f:
@@ -45,7 +48,8 @@ if is_double_pendulum and len(joints) > 1 and any(auto_detected_joints):
     directions = ["clockwise", "counterclockwise"]
     print(
         "Debug: auto-detected actuators. Actuators should move in opposite "
-        "directions (positive = counterclockwise, negative = clockwise):"
+        "directions (positive = counterclockwise, negative = clockwise) "
+        "resulting in the inner leg moving, the outer pointing down:"
     )
     for joint, label, direction in zip(joints, labels, directions):
         print(f"  actuator {joint['id']} is {label} pendulum and should move {direction}.")
