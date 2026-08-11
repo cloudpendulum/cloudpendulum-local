@@ -269,6 +269,8 @@ class Client:
             self.candle.controlMd80SetEncoderZero(md)
             self.candle.controlMd80Mode(md, pyCandle.IMPEDANCE)
             md.setImpedanceControllerParams(0.0, 0.0);
+            md.setTargetTorque(0.0)
+            md.setTargetVelocity(0.0)
             self.candle.controlMd80Enable(md, True)
         self.candle.begin()
         time.sleep(1.0)
@@ -576,7 +578,7 @@ class Client:
         active_indices = self._active_joint_indices()
         if len(data) != len(active_indices):
             self._raise_exception(f"Wrong number of arguments supplied; Expected {len(active_indices)}, got {len(data)}")
-        full_data: list[float | None] = [None] * len(self._robot_joints())
+        full_data: list[float | None] = [0.0] * len(self._robot_joints())
         for value, index in zip(data, active_indices):
             full_data[index] = value
         return full_data
@@ -597,7 +599,7 @@ class Client:
             data = data * len(active_indices)
         if len(data) != len(active_indices):
             self._raise_exception(f"Wrong number of arguments supplied; Expected {len(active_indices)}, got {len(data)}")
-        full_data: list[float | None] = [None] * len(self._robot_joints())
+        full_data: list[float | None] = [0.0] * len(self._robot_joints())
         for value, index in zip(data, active_indices):
             full_data[index] = value
         return full_data
