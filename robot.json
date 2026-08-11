@@ -2,14 +2,12 @@
     "can-baud-rate": 8,
     "robot-joints": [
         {
-            "id": 123,
             "pos_limit": 50.27,
             "vel_limit": 30,
             "torque_limit": 0.15,
             "name": "Base Motor"
         },
         {
-            "id": 456,
             "pos_limit": 50.27,
             "vel_limit": 30,
             "torque_limit": 0.15,
