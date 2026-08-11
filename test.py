@@ -13,6 +13,13 @@ parser.add_argument(
     help="Which system to run the test against. SimplePendulum and "
          "SinglePendulum refer to the same (single-actuator) system.",
 )
+parser.add_argument(
+    "--baud-rate",
+    default=None,
+    choices=["1M", "2M", "5M", "8M"],
+    help="CAN baud rate to use, overriding robot.json's \"can-baud-rate\". "
+         "Defaults to whatever robot.json specifies.",
+)
 args = parser.parse_args()
 experiment_type = args.experiment_type
 is_double_pendulum = experiment_type == "DoublePendulum"
@@ -25,7 +32,10 @@ auto_detected_joints = [
     joint.get("id") is None for joint in _robot_config["robot-joints"]
 ]
 
-client = Client()
+if args.baud_rate is not None:
+    _robot_config["can-baud-rate"] = int(args.baud_rate.rstrip("M"))
+
+client = Client(_robot_config)
 client.start_experiment()
 
 joints = client.robot_config["robot-joints"]

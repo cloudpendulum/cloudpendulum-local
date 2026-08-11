@@ -121,13 +121,20 @@ class Client:
     and can be ignored.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, robot_config: dict | None = None) -> None:
+        """
+        :param robot_config: Robot configuration dict, in the same format as
+            robot.json (see class docstring). If omitted, robot.json is read
+            from the current directory as a fallback.
+        """
         global candle_instance
         global motor_ids_instance
 
-        self.robot_config = {}
-        with open(f"robot.json", "r") as f:
-            self.robot_config = json.load(f)
+        if robot_config is not None:
+            self.robot_config = robot_config
+        else:
+            with open(f"robot.json", "r") as f:
+                self.robot_config = json.load(f)
 
         can_baud_rate_config = self.robot_config["can-baud-rate"]
         if candle_instance is None:
