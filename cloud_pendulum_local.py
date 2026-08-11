@@ -4,6 +4,7 @@ import json
 import math
 import numpy
 from dataclasses import dataclass
+from typing import Any
 
 @dataclass
 class UserInfo:
@@ -25,6 +26,14 @@ class Actuator:
     pos_limit: float
     vel_limit: float
     torque_limit: float
+
+@dataclass
+class ClientCellInfo:
+    """Information about a cell. Included for consistency with the remote
+    client interface; a local setup only ever has a single cell.
+    """
+    cell_id: int
+    cell_type: int | None
 
 candle_instance = None
 motor_ids_instance = None
@@ -243,14 +252,17 @@ class Client:
         experiment_time: float = 0.0,
         preparation_time: float = 0.0,
         record: bool = False,
-        initial_state: list[float] | None = None,
+        initial_position: list[float] | None = None,
+        disturbances=None,
+        cell_id: int | None = None,
+        timeout: float | None = None,
     ) -> tuple[str, str]:
         """Start the experiment by starting the candle loop
 
         :return: Tuple of empty strings, for consistency with the remote
             client.
         """
-                
+
         for md in self.candle.md80s:
             self.candle.controlMd80SetEncoderZero(md)
             self.candle.controlMd80Mode(md, pyCandle.IMPEDANCE)
@@ -258,8 +270,8 @@ class Client:
             self.candle.controlMd80Enable(md, True)
         self.candle.begin()
         time.sleep(1.0)
-        if initial_state is not None:
-            self.go_to_state(initial_state)
+        if initial_position is not None:
+            self.go_to_state(initial_position)
         return "", ""
 
     def stop_experiment(self, session_token: str = "") -> str:
@@ -304,7 +316,7 @@ class Client:
                 torque_limit = joint["torque_limit"]
             )
 
-        return list(map(lambda j: create_actuator, self._robot_joints()))
+        return list(map(create_actuator, self._robot_joints()))
 
     def get_position(self, session_token: str = "") -> list[float] | float:
         """Get the positions of the actuators.
@@ -428,6 +440,90 @@ class Client:
                 continue
             motor = self._get_motor(joint["id"])
             motor.setImpedanceControllerParams(p, d)
+
+    def set_safety_limits(self, limits: list, session_token: str = "") -> bool:
+        """Set the safety limits for a session, by updating the per-joint
+        pos_limit/vel_limit/torque_limit read from robot.json. `kp_max`,
+        `kd_max`, `vel_avg_max` and `torque_avg_max` are ignored, since
+        robot.json doesn't track those.
+
+        :param limits: A list of `SafetyLimits`, one per joint, in
+            `robot-joints` order.
+        :return: True, once the limits have been updated.
+        """
+        for limit, joint in zip(limits, self._robot_joints()):
+            joint["pos_limit"] = limit.pos_max
+            joint["vel_limit"] = limit.vel_max
+            joint["torque_limit"] = limit.torque_max
+        return True
+
+    def start_gym(self, user_token: str = "", gym_time: float = 0.0, cells: list = None) -> str:
+        """Unused method. Included for consistency with the remote client
+        interface. Local hardware setups don't support gym sessions.
+
+        :return: Empty string, for consistency with the remote client.
+        """
+        return ""
+
+    def stop_gym(self, gym_token: str = "") -> None:
+        """Unused method. Included for consistency with the remote client
+        interface. Local hardware setups don't support gym sessions.
+        """
+        return None
+
+    def start_episode(
+        self,
+        gym_token: str = "",
+        experiment_type: str = "",
+        episode_time: float = 0.0,
+        preparation_time: float = 0.0,
+        record: bool = False,
+        initial_position: list[float] | None = None,
+        disturbances=None,
+        cell_id: int | None = None,
+        timeout: float | None = None,
+    ) -> tuple[str, str]:
+        """Unused method. Included for consistency with the remote client
+        interface. Delegates to `start_experiment`, since local hardware
+        setups don't support gym sessions.
+
+        :return: See `start_experiment`.
+        """
+        return self.start_experiment(
+            user_token=gym_token,
+            experiment_type=experiment_type,
+            experiment_time=episode_time,
+            preparation_time=preparation_time,
+            record=record,
+            initial_position=initial_position,
+            disturbances=disturbances,
+            cell_id=cell_id,
+            timeout=timeout,
+        )
+
+    def stop_episode(self, session_token: str = "") -> str:
+        """Unused method. Included for consistency with the remote client
+        interface. Delegates to `stop_experiment`.
+
+        :return: See `stop_experiment`.
+        """
+        return self.stop_experiment(session_token)
+
+    def get_logs(self, session_token: str = "") -> str:
+        """Unused method. Included for consistency with the remote client
+        interface.
+
+        :return: Empty string, for consistency with the remote client.
+        """
+        return ""
+
+    def get_cells(self, user_token: str = "") -> list[ClientCellInfo]:
+        """Unused method. Included for consistency with the remote client
+        interface. A local setup only ever has a single cell.
+
+        :return: A single-entry list describing the local rig as cell 0.
+        """
+        return [ClientCellInfo(cell_id=0, cell_type=None)]
 
     def _robot_joints(self):
         return self.robot_config["robot-joints"]
