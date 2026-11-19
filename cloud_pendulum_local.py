@@ -186,6 +186,16 @@ class Client:
                         for id in motor_ids_instance:
                             candle_instance.addMd80(id)
                         break
+
+                    missing = sorted(manual_ids - set(motor_ids_instance))
+                    raise RuntimeError(
+                        f"Connected motors do not match robot.json: found "
+                        f"ids {sorted(motor_ids_instance)}, but robot.json "
+                        f"needs {len(self._robot_joints())} motor(s)"
+                        + (f" including ids {missing}" if missing else "")
+                        + ". Check wiring/power, or remove joints from "
+                        "robot.json (single pendulum = one joint)."
+                    )
                 except Exception as e:
                     raise RuntimeError(f"No valid candle: {e!r}") from e
 

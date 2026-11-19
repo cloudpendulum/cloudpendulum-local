@@ -31,6 +31,9 @@ if not is_double_pendulum:
 # tell which joints had no "id" pinned, i.e. were auto-detected on the bus.
 with open("robot.json", "r") as f:
     _robot_config = json.load(f)
+if not is_double_pendulum:
+    # single-actuator hardware: only the first joint is connected
+    _robot_config["robot-joints"] = _robot_config["robot-joints"][:1]
 auto_detected_joints = [
     joint.get("id") is None for joint in _robot_config["robot-joints"]
 ]
@@ -68,7 +71,7 @@ if is_double_pendulum:
 else:
     client.set_impedance_controller_params([kp], [kd])
 
-dt = 0.002
+dt = 0.005
 n=int(Tf/dt)
 
 t = 0.0
@@ -89,7 +92,7 @@ while meas_time < Tf:
         # inner actuator moves clockwise (negative), outer counterclockwise (positive)
         client.set_position([-meas_time * 4.0, meas_time * 4.0])
     else:
-        client.set_position(meas_time * 4.0)
+        client.set_position(meas_time * 1.0)
 
     client.get_position()
     client.get_velocity()
