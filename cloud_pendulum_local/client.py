@@ -19,6 +19,10 @@ class UserInfo:
     valid_from: int
     valid_until: int
     experiment_types: list[str]
+    # Gym-related fields of the cloud API (defaults keep old constructions valid)
+    max_gym_length: float = 0.0
+    gym_bucket_size: float = 0.0
+    gym_max_bucket_size: float = 0.0
 
 @dataclass
 class Actuator:
@@ -133,7 +137,8 @@ class Client:
     """
 
     def __init__(self, robot_config: dict | None = None,
-                 can_baud_rate: int | None = None) -> None:
+                 can_baud_rate: int | None = None,
+                 verbose: bool = False) -> None:
         """
         :param robot_config: Robot configuration dict, in the same format as
             robot.json (see class docstring). If omitted, the pendulum type is
@@ -143,6 +148,9 @@ class Client:
             package.
         :param can_baud_rate: Optional override (1, 2, 5 or 8) of the
             config's "can-baud-rate".
+        :param verbose: If True, the native pyCandle driver prints its
+            `[CANDLE] ...` messages. Defaults to False because the verbose
+            driver segfaults inside Jupyter/ipykernel kernels.
         """
         global candle_instance
         global motor_ids_instance
@@ -175,7 +183,7 @@ class Client:
             while True:
                 try:
                     candle_instance = \
-                        pyCandle.Candle(can_baud_rate, True, pyCandle.USB)
+                        pyCandle.Candle(can_baud_rate, verbose, pyCandle.USB)
                     motor_ids_instance = candle_instance.ping(can_baud_rate)
 
                     if auto_select:
@@ -294,6 +302,9 @@ class Client:
             client.
         """
         self.experiment_type = experiment_type
+        # the driver is a process-global singleton; re-bind in case a
+        # previous experiment was stopped on this client
+        self.candle = candle_instance
 
         for md in self.candle.md80s:
             self.candle.controlMd80SetEncoderZero(md)
@@ -306,6 +317,13 @@ class Client:
         time.sleep(1.0)
         if initial_position is not None:
             self.go_to_state(initial_position)
+            # Release the motors so the experiment starts passive (like the
+            # cloud does) instead of the stiff go_to_state spring holding
+            # the target.
+            for md in self.candle.md80s:
+                md.setImpedanceControllerParams(0.0, 0.0)
+                md.setTargetTorque(0.0)
+                md.setTargetVelocity(0.0)
         return "", ""
 
     def stop_experiment(self, session_token: str = "") -> str:
@@ -315,7 +333,6 @@ class Client:
         :return: Empty string, for consistency with the remote client.
         """
         self._reset_motors()
-        self.candle = None
         return ""
 
     def get_user_info(self, user_token: str = "") -> UserInfo:
@@ -326,14 +343,17 @@ class Client:
         """
         return UserInfo(
             user_name = "",
-            max_experiment_length = 0.0,
-            number_of_attempts = 0,
-            max_bucket_size = 0,
-            bucket_size = 0,
+            max_experiment_length = math.inf,
+            number_of_attempts = math.inf,
+            max_bucket_size = math.inf,
+            bucket_size = math.inf,
             refil_interval = 0,
             valid_from = 0,
-            valid_until = 0,
-            experiment_types = []
+            valid_until = math.inf,
+            experiment_types = ["SimplePendulum", "DoublePendulum"],
+            max_gym_length = math.inf,
+            gym_bucket_size = math.inf,
+            gym_max_bucket_size = math.inf
         )
 
     def get_actuator_info(self, session_token: str = "") -> list[Actuator]:

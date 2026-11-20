@@ -32,13 +32,14 @@ def main(argv=None):
     if experiment_type == "auto":
         # Client detects single/double pendulum from the connected motors and
         # prints which one it chose.
-        client = Client(can_baud_rate=baud)
+        client = Client(can_baud_rate=baud, verbose=True)
     else:
         # Explicit choice: use the matching config file (see robot_config)
         # and require matching hardware.
         config_name = "robot.json" if experiment_type == "DoublePendulum" \
             else "robot_single.json"
-        client = Client(load_config_file(config_name), can_baud_rate=baud)
+        client = Client(load_config_file(config_name), can_baud_rate=baud,
+                        verbose=True)
 
     joints = client.robot_config["robot-joints"]
     is_double_pendulum = len(joints) > 1
