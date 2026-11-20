@@ -1,0 +1,11 @@
+{
+    "can-baud-rate": 8,
+    "robot-joints": [
+        {
+            "pos_limit": 50.27,
+            "vel_limit": 30,
+            "torque_limit": 0.15,
+            "name": "Base Motor"
+        }
+    ]
+}

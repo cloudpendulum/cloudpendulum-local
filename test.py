@@ -8,10 +8,12 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "experiment_type",
     nargs="?",
-    default="SimplePendulum",
-    choices=["SimplePendulum", "SinglePendulum", "DoublePendulum"],
-    help="Which system to run the test against. SimplePendulum and "
-         "SinglePendulum refer to the same (single-actuator) system.",
+    default="auto",
+    choices=["auto", "SimplePendulum", "SinglePendulum", "DoublePendulum"],
+    help="Which system to run the test against. Default 'auto' detects it "
+         "from the number of connected motors (1 = single, 2 = double). "
+         "SimplePendulum and SinglePendulum refer to the same "
+         "(single-actuator) system.",
 )
 parser.add_argument(
     "--baud-rate",
@@ -22,29 +24,29 @@ parser.add_argument(
 )
 args = parser.parse_args()
 experiment_type = args.experiment_type
-is_double_pendulum = experiment_type == "DoublePendulum"
 
-if not is_double_pendulum:
-    print("Defaulting to SinglePendulum. If you have DoublePendulum hardware instead, this can lead to confusing error messages.")
+baud = int(args.baud_rate.rstrip("M")) if args.baud_rate is not None else None
 
-# Read robot.json ourselves (before Client() mutates its own copy) so we can
-# tell which joints had no "id" pinned, i.e. were auto-detected on the bus.
-with open("robot.json", "r") as f:
-    _robot_config = json.load(f)
-if not is_double_pendulum:
-    # single-actuator hardware: only the first joint is connected
-    _robot_config["robot-joints"] = _robot_config["robot-joints"][:1]
-auto_detected_joints = [
-    joint.get("id") is None for joint in _robot_config["robot-joints"]
-]
-
-if args.baud_rate is not None:
-    _robot_config["can-baud-rate"] = int(args.baud_rate.rstrip("M"))
-
-client = Client(_robot_config)
-client.start_experiment()
+if experiment_type == "auto":
+    # Client detects single/double pendulum from the connected motors and
+    # prints which one it chose.
+    client = Client(can_baud_rate=baud)
+else:
+    # Explicit choice: use the matching config file (current directory,
+    # else next to the driver) and require matching hardware.
+    config_name = "robot.json" if experiment_type == "DoublePendulum" \
+        else "robot_single.json"
+    client = Client(Client._load_config_file(config_name), can_baud_rate=baud)
 
 joints = client.robot_config["robot-joints"]
+is_double_pendulum = len(joints) > 1
+# Joints without a pinned "id" were auto-detected on the bus.
+# (Client fills in the ids, so look at the config file instead.)
+auto_detected_joints = [
+    j.get("id") is None
+    for j in Client._load_config_file("robot.json")["robot-joints"]
+][:len(joints)]
+client.start_experiment()
 
 if is_double_pendulum and len(joints) > 1 and any(auto_detected_joints):
     labels = ["inner", "outer"]
