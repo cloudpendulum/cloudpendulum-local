@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cloud-pendulum-local"
+version = "0.1.0"
+description = "Driver for local versions of the CloudPendulum single and double pendulums"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["numpy>=2", "pyCandleMAB>=1.6.2"]
+
+[project.scripts]
+cloud-pendulum-test = "cloud_pendulum_local.selftest:main"
+cloud-pendulum-robot-template = "cloud_pendulum_local.robot_config:print_template_path"
+
+[tool.setuptools.packages.find]
+include = ["cloud_pendulum_local*"]
+
+[tool.setuptools.package-data]
+cloud_pendulum_local = ["robot.json"]

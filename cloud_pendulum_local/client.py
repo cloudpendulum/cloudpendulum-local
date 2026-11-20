@@ -6,6 +6,8 @@ import numpy
 from dataclasses import dataclass
 from typing import Any
 
+from .robot_config import load_robot_config
+
 @dataclass
 class UserInfo:
     user_name: str
@@ -16,7 +18,7 @@ class UserInfo:
     refil_interval: int
     valid_from: int
     valid_until: int
-    experiment_types: [str]
+    experiment_types: list[str]
 
 @dataclass
 class Actuator:
@@ -133,8 +135,8 @@ class Client:
     def __init__(self, robot_config: dict | None = None) -> None:
         """
         :param robot_config: Robot configuration dict, in the same format as
-            robot.json (see class docstring). If omitted, robot.json is read
-            from the current directory as a fallback.
+            robot.json (see class docstring). If omitted, robot.json is located
+            via `load_robot_config` ($CLOUD_PENDULUM_ROBOT_CONFIG, then ./robot.json).
         """
         global candle_instance
         global motor_ids_instance
@@ -142,8 +144,7 @@ class Client:
         if robot_config is not None:
             self.robot_config = robot_config
         else:
-            with open(f"robot.json", "r") as f:
-                self.robot_config = json.load(f)
+            self.robot_config = load_robot_config()
 
         can_baud_rate_config = self.robot_config["can-baud-rate"]
         if candle_instance is None:
