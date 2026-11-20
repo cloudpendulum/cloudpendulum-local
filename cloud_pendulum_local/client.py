@@ -387,7 +387,7 @@ class Client:
             if not -pos_limit < pos < pos_limit:
                 self._raise_exception(f"PositionLimitViolation;value={pos}")
             res = res + [pos]
-        return self._prepare_output_data(res)
+        return res
 
     def get_velocity(self, session_token: str = "") -> list[float] | float:
         """Get the velocities of the actuators.
@@ -404,7 +404,7 @@ class Client:
             if not -vel_limit < vel < vel_limit:
                 self._raise_exception(f"VelocityLimitViolation;value={vel}")
             res = res + [vel]
-        return self._prepare_output_data(res)
+        return res
 
     def get_torque(self, session_token: str = "") -> list[float] | float:
         """Get the torques of the actuators.
@@ -421,7 +421,7 @@ class Client:
             if not -torque_limit < torque < torque_limit:
                 self._raise_exception(f"TorqueLimitViolation;value={torque}")
             res = res + [torque]
-        return self._prepare_output_data(res)
+        return res
 
     def set_position(self, positions: list[float | None] | float, session_token: str = ""):
         """Set the target positions for the actuators.
@@ -678,11 +678,6 @@ class Client:
         for value, index in zip(data, active_indices):
             full_data[index] = value
         return full_data
-
-    def _prepare_output_data(self, data: list[float]) -> list[float] | float:
-        if len(data) == 1:
-            return data[0]
-        return data
 
     def _raise_exception(self, message):
         self._reset_motors()
