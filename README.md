@@ -9,14 +9,14 @@ Driver for local versions of the CloudPendulum single and double pendulums.
 python3 -m venv CPvenv
 source CPvenv/bin/activate
 # Install the package (pulls in numpy and pyCandleMAB)
-pip install .   # or `pip install -e .` for development
+pip install .
+```
+or for development
+```
+pip install -e .
 ```
 
-The `import pyCandle` workaround for the C++ library linking bug in the MAB motor driver is done automatically when the package is imported.
-
 ## Configuration
-
-Without an explicit config, `Client()` detects the system from the number of motors on the CAN bus: 1 motor uses `robot_single.json` (single pendulum), 2 motors use `robot.json` (double pendulum). These files are searched in `$CLOUD_PENDULUM_CONFIG_DIR`, then the current directory, then the templates shipped with the package. Print the template folder with `cloud-pendulum-robot-template` and copy a file from there as a starting point.
 
 Check everything worked
 ```
@@ -29,5 +29,6 @@ If your drive is still not recognized, it might be connected to the baud rate th
 cloud-pendulum-test SimplePendulum --baud-rate 1M # or 2M,5M,8M
 ```
 
-
-Note: Your user should be in dialout group
+Note: 
+1. Your user should be in dialout group
+2. Library auto detects single or double pendulum and safety configuration. Can be changed on your own risk in `robot_single.json` resp. `robot.json` or by passing your own parameter dictionary (same structure as `dict(json.load("robot.json"))`).

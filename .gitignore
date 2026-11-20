@@ -3,3 +3,4 @@ CPvenv/
 *.egg-info/
 build/
 dist/
+.claude/
