@@ -6,7 +6,7 @@ import numpy
 from dataclasses import dataclass
 from typing import Any
 
-from .robot_config import load_robot_config
+from .robot_config import load_config_file
 
 @dataclass
 class UserInfo:
@@ -132,19 +132,31 @@ class Client:
     and can be ignored.
     """
 
-    def __init__(self, robot_config: dict | None = None) -> None:
+    def __init__(self, robot_config: dict | None = None,
+                 can_baud_rate: int | None = None) -> None:
         """
         :param robot_config: Robot configuration dict, in the same format as
-            robot.json (see class docstring). If omitted, robot.json is located
-            via `load_robot_config` ($CLOUD_PENDULUM_ROBOT_CONFIG, then ./robot.json).
+            robot.json (see class docstring). If omitted, the pendulum type is
+            detected from the number of connected motors: 1 -> robot_single.json,
+            2 -> robot.json. These are searched in $CLOUD_PENDULUM_CONFIG_DIR,
+            then the current directory, then the templates shipped with the
+            package.
+        :param can_baud_rate: Optional override (1, 2, 5 or 8) of the
+            config's "can-baud-rate".
         """
         global candle_instance
         global motor_ids_instance
 
+        # Without an explicit config, the pendulum type is chosen from the
+        # number of motors found on the bus (see _select_config_by_motors).
+        auto_select = robot_config is None
+        self._baud_override = can_baud_rate
         if robot_config is not None:
             self.robot_config = robot_config
         else:
-            self.robot_config = load_robot_config()
+            self.robot_config = self._load_config_file("robot.json")
+        if can_baud_rate is not None:
+            self.robot_config["can-baud-rate"] = can_baud_rate
 
         can_baud_rate_config = self.robot_config["can-baud-rate"]
         if candle_instance is None:
@@ -160,19 +172,23 @@ class Client:
             else:
                 raise RuntimeError(f"Invalid baudrate: {can_baud_rate_config}, should be 1, 2, 5 or 8")
 
-            manual_ids = {
-                joint["id"] for joint in self._robot_joints()
-                if joint.get("id") is not None
-            }
-            auto_joint_count = sum(
-                [1 for joint in self._robot_joints() if joint.get("id") is None] + [0]
-            )
-
             while True:
                 try:
                     candle_instance = \
                         pyCandle.Candle(can_baud_rate, True, pyCandle.USB)
                     motor_ids_instance = candle_instance.ping(can_baud_rate)
+
+                    if auto_select:
+                        self._select_config_by_motors(motor_ids_instance)
+
+                    manual_ids = {
+                        joint["id"] for joint in self._robot_joints()
+                        if joint.get("id") is not None
+                    }
+                    auto_joint_count = sum(
+                        [1 for joint in self._robot_joints()
+                         if joint.get("id") is None] + [0]
+                    )
 
                     # manually-pinned joints must all be present, and there
                     # must be enough leftover motors to cover the
@@ -199,6 +215,9 @@ class Client:
                     )
                 except Exception as e:
                     raise RuntimeError(f"No valid candle: {e!r}") from e
+
+        elif auto_select:
+            self._select_config_by_motors(motor_ids_instance)
 
         self.candle = candle_instance
         self.all_motor_ids = motor_ids_instance
@@ -539,6 +558,31 @@ class Client:
         :return: A single-entry list describing the local rig as cell 0.
         """
         return [ClientCellInfo(cell_id=0, cell_type=None)]
+
+    @staticmethod
+    def _load_config_file(name: str) -> dict:
+        """Load `name` from $CLOUD_PENDULUM_CONFIG_DIR, else the current
+        directory, falling back to the templates shipped with the package."""
+        return load_config_file(name)
+
+    def _select_config_by_motors(self, motor_ids) -> None:
+        """Pick robot_single.json (1 motor) or robot.json (2 motors) from the
+        number of motors found on the CAN bus, and tell the user."""
+        n = len(motor_ids)
+        if n == 1:
+            self.robot_config = self._load_config_file("robot_single.json")
+            print("Found 1 motor on the CAN bus: assuming a SINGLE pendulum "
+                  "(using robot_single.json).")
+        elif n == 2:
+            self.robot_config = self._load_config_file("robot.json")
+            print("Found 2 motors on the CAN bus: assuming a DOUBLE pendulum "
+                  "(using robot.json).")
+        else:
+            raise RuntimeError(
+                f"Found {n} motors on the CAN bus ({sorted(motor_ids)}); "
+                f"expected 1 (single pendulum) or 2 (double pendulum).")
+        if self._baud_override is not None:
+            self.robot_config["can-baud-rate"] = self._baud_override
 
     def _robot_joints(self):
         return self.robot_config["robot-joints"]

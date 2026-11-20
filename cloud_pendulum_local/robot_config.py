@@ -1,35 +1,32 @@
-"""Locating and loading the robot configuration (robot.json)."""
+"""Locating and loading robot configuration files (robot.json, robot_single.json)."""
 import json
 import os
 from importlib import resources
 
-ENV_VAR = "CLOUD_PENDULUM_ROBOT_CONFIG"
-FILE_NAME = "robot.json"
+ENV_VAR = "CLOUD_PENDULUM_CONFIG_DIR"
 
 
-def template_path() -> str:
-    """Path of the robot.json template shipped with the package."""
-    return str(resources.files("cloud_pendulum_local").joinpath(FILE_NAME))
+def package_config_path(name: str) -> str:
+    """Path of the config template `name` shipped with the package."""
+    return str(resources.files("cloud_pendulum_local").joinpath(name))
 
 
-def find_robot_config() -> str:
-    """Return the robot config path: $CLOUD_PENDULUM_ROBOT_CONFIG, else ./robot.json."""
-    env = os.environ.get(ENV_VAR)
-    if env:
-        return env
-    if os.path.exists(FILE_NAME):
-        return FILE_NAME
-    raise FileNotFoundError(
-        f"No {FILE_NAME} found in the current directory and ${ENV_VAR} is not set. "
-        f"Copy the template from {template_path()} and adapt it "
-        f"(run `cloud-pendulum-robot-template` to print its path)."
-    )
+def find_config_file(name: str) -> str:
+    """Locate config file `name`: $CLOUD_PENDULUM_CONFIG_DIR, then the current
+    directory, then the template shipped with the package."""
+    env_dir = os.environ.get(ENV_VAR)
+    if env_dir and os.path.exists(os.path.join(env_dir, name)):
+        return os.path.join(env_dir, name)
+    if os.path.exists(name):
+        return name
+    return package_config_path(name)
 
 
-def load_robot_config(path: str | None = None) -> dict:
-    with open(path or find_robot_config(), "r") as f:
+def load_config_file(name: str) -> dict:
+    with open(find_config_file(name), "r") as f:
         return json.load(f)
 
 
 def print_template_path() -> None:
-    print(template_path())
+    """Console entry point: print the directory holding the shipped templates."""
+    print(os.path.dirname(package_config_path("robot.json")))

@@ -16,12 +16,13 @@ The `import pyCandle` workaround for the C++ library linking bug in the MAB moto
 
 ## Configuration
 
-The robot config is read from `$CLOUD_PENDULUM_ROBOT_CONFIG`, else `./robot.json`. A template ships with the package; print its path with `cloud-pendulum-robot-template` and copy it as a starting point.
+Without an explicit config, `Client()` detects the system from the number of motors on the CAN bus: 1 motor uses `robot_single.json` (single pendulum), 2 motors use `robot.json` (double pendulum). These files are searched in `$CLOUD_PENDULUM_CONFIG_DIR`, then the current directory, then the templates shipped with the package. Print the template folder with `cloud-pendulum-robot-template` and copy a file from there as a starting point.
 
 Check everything worked
 ```
 lsusb | grep MAB
-cloud-pendulum-test SimplePendulum # resp. DoublePendulum
+cloud-pendulum-test            # auto-detects single/double pendulum
+cloud-pendulum-test SimplePendulum # or DoublePendulum to force a type
 ```
 If your drive is still not recognized, it might be connected to the baud rate the motor driver is configured to. This can be changed permamently using MAB Robotics tools (see their website), or you simply connect with the expected rate:
 ```
