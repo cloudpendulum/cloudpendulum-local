@@ -49,14 +49,15 @@ class Disturbance:
 
 @dataclass 
 class TimedTorqueDisturbance(Disturbance):
-    """Apply extra torque additively at `start_time` for `duration` seconds.
+    """Apply extra torque additively at `trigger_time` for `duration` seconds.
     One torque value per actuator.
 
-    :param start_time: Start time in seconds after experiment start
+    :param trigger_time: Time in seconds after experiment start at which the
+        torque is applied
     :param duration: Duration in seconds for how long the torque is applied
     :param torque: List of torque values, one per actuator
     """
-    start_time: float
+    trigger_time: float
     duration: float
     torque: list[float]
     type: str = field(default="timed_torque", init=False) # Tag used for JSON serialization
