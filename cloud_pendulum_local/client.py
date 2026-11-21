@@ -512,13 +512,21 @@ class Client:
             joint["torque_limit"] = limit.torque_max
         return True
 
-    def start_gym(self, user_token: str = "", gym_time: float = 0.0, cells: list = None) -> str:
-        """Unused method. Included for consistency with the remote client
-        interface. Local hardware setups don't support gym sessions.
+    def start_gym(self, user_token: str = "", gym_time: float = 0.0, cells: list = None) -> tuple:
+        """Included for consistency with the remote client interface. Local
+        hardware setups don't have a real gym session: this only checks that
+        at most one cell is requested (a local setup has exactly one) and
+        otherwise does nothing.
 
-        :return: Empty string, for consistency with the remote client.
+        :return: Tuple (gym_token, gym_url) of empty strings, for consistency
+            with the remote client.
         """
-        return ""
+        if cells is not None and len(cells) > 1:
+            raise RuntimeError(
+                f"Requested {len(cells)} cells, but a local setup only has one "
+                f"cell. Request a single cell (e.g. N_CELLS = 1)."
+            )
+        return "", ""
 
     def stop_gym(self, gym_token: str = "") -> None:
         """Unused method. Included for consistency with the remote client

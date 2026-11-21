@@ -3,5 +3,6 @@
 import pyCandle
 
 from .client import Client
+from .data import CellType
 
-__all__ = ["Client"]
+__all__ = ["Client", "CellType"]
