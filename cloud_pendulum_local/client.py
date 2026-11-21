@@ -7,6 +7,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from .robot_config import load_config_file
+from .disturbance import (
+    Disturbance,
+    DisturbanceSchema,
+    TimedTorqueDisturbance,
+    TimedPositionDisturbance,
+    StateDependentTorqueDisturbance,
+    StateDependentPositionDisturbance,
+)
 
 @dataclass
 class UserInfo:
@@ -256,6 +264,16 @@ class Client:
             next_auto += 1
             print(f"Auto-assigned motor {joint['id']} to joint '{joint.get('name', '?')}'")
 
+        # Client-side disturbance state (see _update_disturbances)
+        n_joints = len(self._robot_joints())
+        self._dists: list[dict] = []
+        self._dist_log: list[str] = []
+        self._override: dict | None = None
+        self._exp_t0 = time.monotonic()
+        self._user_torque: list[float] = [0.0] * n_joints
+        self._user_imp: list[tuple[float, float]] = [(0.0, 0.0)] * n_joints
+        self._dist_torque: list[float] = []
+
     def go_to_state(self, x0: list[float]):
         actuator_ids = []
         for joint in self._robot_joints():
@@ -298,10 +316,18 @@ class Client:
     ) -> tuple[str, str]:
         """Start the experiment by starting the candle loop
 
+        :param disturbances: A `Disturbance` or a list of them (see the
+            `disturbance` module). They are applied client-side, whenever the
+            control loop calls `get_position`, `get_velocity` or one of the
+            `set_*` methods, so timing is only as precise as that loop.
+            Named schemas (strings) are not supported locally and raise
+            `NotImplementedError`.
         :return: Tuple of empty strings, for consistency with the remote
             client.
         """
         self.experiment_type = experiment_type
+        # validate disturbances before any motor is touched
+        self._setup_disturbances(disturbances, initial_position)
         # the driver is a process-global singleton; re-bind in case a
         # previous experiment was stopped on this client
         self.candle = candle_instance
@@ -324,6 +350,11 @@ class Client:
                 md.setImpedanceControllerParams(0.0, 0.0)
                 md.setTargetTorque(0.0)
                 md.setTargetVelocity(0.0)
+        n_joints = len(self._robot_joints())
+        self._user_torque = [0.0] * n_joints
+        self._user_imp = [(0.0, 0.0)] * n_joints
+        self._dist_torque = [0.0] * len(self._active_joint_indices())
+        self._exp_t0 = time.monotonic()
         print("Starting")
         return "", ""
 
@@ -380,6 +411,7 @@ class Client:
             list if the experiment has more than one actuator. Otherwise, a
             single number is returned.
         """
+        self._update_disturbances()
         res: list[float] = []
         for joint in self._robot_joints():
             motor_id = joint["id"]
@@ -397,6 +429,7 @@ class Client:
             as a list if the experiment has more than one actuator. Otherwise,
             a single number is returned.
         """
+        self._update_disturbances()
         res: list[float] = []
         for joint in self._robot_joints():
             motor_id = joint["id"]
@@ -432,6 +465,9 @@ class Client:
             supplied for experiments that only use a single motor.
         """
         positions = self._prepare_actuator_data(positions)
+        self._update_disturbances()
+        if self._override is not None:
+            return  # a position disturbance currently overrides the controller
         for position, joint in zip(positions, self._robot_joints()):
             if position is None:
                 continue
@@ -449,6 +485,9 @@ class Client:
             supplied for experiments that only use a single motor.
         """
         velocities = self._prepare_actuator_data(velocities)
+        self._update_disturbances()
+        if self._override is not None:
+            return  # a position disturbance currently overrides the controller
         for velocity, joint in zip(velocities, self._robot_joints()):
             if velocity is None:
                 continue
@@ -466,14 +505,16 @@ class Client:
             supplied for experiments that only use a single motor.
         """
         torques = self._prepare_actuator_data(torques)
-        for torque, joint in zip(torques, self._robot_joints()):
+        self._update_disturbances()
+        for i, (torque, joint) in enumerate(zip(torques, self._robot_joints())):
             if torque is None:
                 continue
             torque_limit = joint["torque_limit"]
             clamped_torque = min(torque_limit, max(-torque_limit, torque))
-            self._get_motor(joint["id"]).setTargetTorque(clamped_torque)
+            self._user_torque[i] = clamped_torque
             if torque_limit < abs(torque):
                 print(f"Torque clamped from {torque} to {clamped_torque}")
+        self._apply_torque()
 
     def set_impedance_controller_params(
         self,
@@ -490,9 +531,12 @@ class Client:
         """
         kp = self._prepare_actuator_data_fill(kp)
         kd = self._prepare_actuator_data_fill(kd)
-        for p, d, joint in zip(kp, kd, self._robot_joints()):
+        for i, (p, d, joint) in enumerate(zip(kp, kd, self._robot_joints())):
             if p is None or d is None:
                 continue
+            self._user_imp[i] = (p, d)
+            if self._override is not None:
+                continue  # restored when the position disturbance ends
             motor = self._get_motor(joint["id"])
             motor.setImpedanceControllerParams(p, d)
 
@@ -573,12 +617,11 @@ class Client:
         return self.stop_experiment(session_token)
 
     def get_logs(self, session_token: str = "") -> str:
-        """Unused method. Included for consistency with the remote client
-        interface.
+        """Get a log of the disturbances that were triggered, one per line.
 
-        :return: Empty string, for consistency with the remote client.
+        :return: The log text, empty if no disturbance has fired.
         """
-        return ""
+        return "\n".join(self._dist_log)
 
     def get_cells(self, user_token: str = "") -> list[ClientCellInfo]:
         """Unused method. Included for consistency with the remote client
@@ -637,7 +680,188 @@ class Client:
                 return md
         self._raise_exception(f"No motor with id {id} connected")
 
+    # ------------------------------------------------------------------
+    # Client-side disturbances
+    # ------------------------------------------------------------------
+
+    def _to_active(self, vec, name: str) -> list[float]:
+        """Convert a per-actuator vector to one value per *active* joint.
+        Accepts either one value per active joint or one per physical joint."""
+        vec = numpy.asarray(vec, dtype=float).reshape(-1).tolist()
+        active = self._active_joint_indices()
+        if len(vec) == len(active):
+            return vec
+        if len(vec) == len(self._robot_joints()):
+            return [vec[i] for i in active]
+        raise RuntimeError(
+            f"Disturbance {name} has {len(vec)} value(s), expected "
+            f"{len(active)} (one per actuator)")
+
+    def _setup_disturbances(self, disturbances, initial_position) -> None:
+        self._dists = []
+        self._dist_log = []
+        self._override = None
+        if disturbances is None:
+            return
+        if not isinstance(disturbances, (list, tuple)):
+            disturbances = [disturbances]
+        for d in disturbances:
+            if isinstance(d, (str, DisturbanceSchema)):
+                raise NotImplementedError(
+                    "Named disturbance schemas are not supported by the "
+                    "local client; pass a list of Disturbance objects.")
+            if not isinstance(d, Disturbance):
+                raise RuntimeError("Invalid disturbance")
+            st: dict = {"d": d, "fired": False, "t_trigger": None, "since": None}
+            if isinstance(d, (TimedTorqueDisturbance, StateDependentTorqueDisturbance)):
+                st["torque"] = self._to_active(d.torque, "torque")
+            if isinstance(d, (StateDependentTorqueDisturbance,
+                              StateDependentPositionDisturbance)):
+                goal = d.goal_position
+                if goal is None:
+                    goal = initial_position
+                if goal is None:
+                    raise RuntimeError(
+                        "goal_position is None and no initial_position was "
+                        "given to start_experiment")
+                st["goal"] = self._to_active(goal, "goal_position")
+            if isinstance(d, (TimedPositionDisturbance,
+                              StateDependentPositionDisturbance)):
+                st["target"] = None if d.disturbance_position is None else \
+                    self._to_active(d.disturbance_position, "disturbance_position")
+            self._dists.append(st)
+
+    def _log_disturbance(self, t: float, text: str) -> None:
+        self._dist_log.append(f"t={t:.3f}s: {text}")
+
+    def _at_goal_long_enough(self, st: dict, d, pos, vel, now: float) -> bool:
+        """State-dependent trigger check; True once, when the wait is over."""
+        # wrap the error to [-pi, pi) so equivalent angles (multiples of 2*pi
+        # apart) count as the same position
+        def wrap(e: float) -> float:
+            return (e + math.pi) % (2.0 * math.pi) - math.pi
+
+        near = all(abs(wrap(p - g)) <= d.target_pos_threshold
+                   for p, g in zip(pos, st["goal"])) \
+            and all(abs(v) <= d.target_vel_threshold for v in vel)
+        if not near:
+            st["since"] = None
+            return False
+        if st["since"] is None:
+            st["since"] = now
+        return now - st["since"] >= d.wait_at_target_seconds
+
+    def _update_disturbances(self) -> None:
+        """Advance the disturbance state machine. Called from the API methods
+        the control loop uses, so it runs once per control tick."""
+        if self._override is not None:
+            self._step_override(time.monotonic())
+            return
+        if not self._dists:
+            return
+        now = time.monotonic()
+        t = now - self._exp_t0
+        joints = self._robot_joints()
+        active = self._active_joint_indices()
+        pos = [self._get_motor(joints[i]["id"]).getPosition() for i in active]
+        vel = [self._get_motor(joints[i]["id"]).getVelocity() for i in active]
+
+        dist_torque = [0.0] * len(active)
+        for st in self._dists:
+            d = st["d"]
+            if isinstance(d, TimedTorqueDisturbance):
+                if d.trigger_time <= t < d.trigger_time + d.duration:
+                    if not st["fired"]:
+                        st["fired"] = True
+                        self._log_disturbance(t, f"timed torque {st['torque']} for {d.duration}s")
+                    dist_torque = [a + b for a, b in zip(dist_torque, st["torque"])]
+            elif isinstance(d, StateDependentTorqueDisturbance):
+                if not st["fired"] and self._at_goal_long_enough(st, d, pos, vel, now):
+                    st["fired"] = True
+                    st["t_trigger"] = t
+                    self._log_disturbance(t, f"state-dependent torque {st['torque']} for {d.duration}s")
+                if st["t_trigger"] is not None and \
+                        st["t_trigger"] <= t < st["t_trigger"] + d.duration:
+                    dist_torque = [a + b for a, b in zip(dist_torque, st["torque"])]
+            elif isinstance(d, TimedPositionDisturbance):
+                if not st["fired"] and t >= d.trigger_time:
+                    st["fired"] = True
+                    self._start_override(st, pos, now, t, "timed position")
+                    return
+            elif isinstance(d, StateDependentPositionDisturbance):
+                if not st["fired"] and self._at_goal_long_enough(st, d, pos, vel, now):
+                    st["fired"] = True
+                    self._start_override(st, pos, now, t, "state-dependent position")
+                    return
+
+        if dist_torque != self._dist_torque:
+            self._dist_torque = dist_torque
+            self._apply_torque()
+
+    def _apply_torque(self) -> None:
+        """Write the user's torque plus any active torque disturbance."""
+        if self._override is not None:
+            return
+        active = self._active_joint_indices()
+        total = list(self._user_torque)
+        for k, i in enumerate(active):
+            if k < len(self._dist_torque):
+                total[i] += self._dist_torque[k]
+        for value, joint in zip(total, self._robot_joints()):
+            limit = joint["torque_limit"]
+            self._get_motor(joint["id"]).setTargetTorque(min(limit, max(-limit, value)))
+
+    def _start_override(self, st: dict, pos: list[float], now: float, t: float, label: str) -> None:
+        """Take over the active motors and drive them to the disturbance
+        position along a cubic trajectory."""
+        joints = self._robot_joints()
+        active = self._active_joint_indices()
+        target = st["target"]
+        if target is None:
+            target = [numpy.random.uniform(-joints[i]["pos_limit"], joints[i]["pos_limit"])
+                      for i in active]
+        # keep within limits, and slow enough to stay under the velocity limits
+        target = [min(joints[i]["pos_limit"], max(-joints[i]["pos_limit"], x))
+                  for x, i in zip(target, active)]
+        duration = 1.0
+        for p, x, i in zip(pos, target, active):
+            duration = max(duration, 1.5 * abs(x - p) / (0.5 * joints[i]["vel_limit"]))
+        self._override = {"t0": now, "T": duration, "start": list(pos), "target": target}
+        self._dist_torque = [0.0] * len(active)
+        for i in active:
+            motor = self._get_motor(joints[i]["id"])
+            motor.setImpedanceControllerParams(0.25, 0.0015)
+            motor.setTargetTorque(0.0)
+            motor.setTargetVelocity(0.0)
+        self._log_disturbance(t, f"{label} jump to {[round(x, 3) for x in target]}")
+
+    def _step_override(self, now: float) -> None:
+        o = self._override
+        joints = self._robot_joints()
+        active = self._active_joint_indices()
+        s = min(1.0, (now - o["t0"]) / o["T"])
+        scale = CubicTimeScaling(1.0, s)
+        for k, i in enumerate(active):
+            x = o["start"][k] + scale * (o["target"][k] - o["start"][k])
+            self._get_motor(joints[i]["id"]).setTargetPosition(x)
+        if s >= 1.0:
+            self._end_override()
+
+    def _end_override(self) -> None:
+        """Hand control back to the user: restore their impedance parameters
+        and torque command."""
+        joints = self._robot_joints()
+        self._override = None
+        for i in self._active_joint_indices():
+            motor = self._get_motor(joints[i]["id"])
+            kp, kd = self._user_imp[i]
+            motor.setImpedanceControllerParams(kp, kd)
+            motor.setTargetVelocity(0.0)
+        self._apply_torque()
+
     def _reset_motors(self):
+        self._dists = []
+        self._override = None
         for motor in self.candle.md80s:
             pos = motor.getPosition()
             offset = round(pos / (2.0 * math.pi)) * (2.0 * math.pi)
