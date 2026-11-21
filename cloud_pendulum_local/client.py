@@ -324,6 +324,7 @@ class Client:
                 md.setImpedanceControllerParams(0.0, 0.0)
                 md.setTargetTorque(0.0)
                 md.setTargetVelocity(0.0)
+        print("Starting")
         return "", ""
 
     def stop_experiment(self, session_token: str = "") -> str:
