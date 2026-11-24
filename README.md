@@ -21,10 +21,29 @@ pip install -e .
 Check everything worked
 ```
 lsusb | grep MAB
+```
+This means you can see the motor driver.
+
+Next, check if `dialout` and `uucp` are in your user's groups:
+```
+groups
+# should show among others dialout, uucp
+```
+If it doesn't, add your user to these groups
+```
+sudo usermod -aG dialout $USER
+sudo usermod -aG uucp $USER
+```
+and reload the groups (alternatively, log yourself out and in again)
+```
+su -l $USER
+```
+Test that you can actuate the motor:
+```
 cloud-pendulum-test            # auto-detects single/double pendulum
 cloud-pendulum-test SimplePendulum # or DoublePendulum to force a type
 ```
-If your drive is still not recognized, it might be connected to the baud rate the motor driver is configured to. This can be changed permamently using MAB Robotics tools (see their website), or you simply connect with the expected rate:
+If your drive is still not recognized, it might be connected to the baud rate the motor driver is configured to. This can be changed permanently using MAB Robotics tools (see their website), or you simply connect with the expected rate:
 ```
 cloud-pendulum-test SimplePendulum --baud-rate 1M # or 2M,5M,8M
 ```
